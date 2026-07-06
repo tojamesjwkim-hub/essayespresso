@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Worksheet</title>
+<style>
+  body { font-family: Arial, sans-serif; color: #000; background: #fff;
+         max-width: 720px; margin: 40px auto; padding: 0 16px; }
+  textarea { font-family: Arial, sans-serif; font-size: 16px; width: 100%;
+             box-sizing: border-box; border: 1px solid #000; padding: 6px;
+             min-height: 90px; }
+  button, select { font-family: Arial, sans-serif; font-size: 16px; padding: 6px;
+                   border: 1px solid #000; background: #fff; cursor: pointer; }
+  .q { margin-bottom: 24px; }
+  .bar { margin: 16px 0; }
+  #status { margin-left: 8px; }
+  @media print {
+    .noprint { display: none; }
+    textarea { border: 1px solid #000; overflow: visible; }
+    body { margin: 0; max-width: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="noprint bar">
+  <a href="index.html">← All worksheets</a>
+</div>
+
+<h1 id="title">Loading…</h1>
+<p class="noprint"><a id="slides" href="#" target="_blank">Open slideshow →</a></p>
+
+<div class="noprint bar">
+  Attempt:
+  <select id="attemptSel" onchange="switchAttempt()"></select>
+  <button onclick="newAttempt()">Start new attempt</button>
+</div>
+
+<div id="questions"></div>
+
+<div class="noprint bar">
+  <button onclick="save()">Save</button>
+  <button onclick="window.print()">Print</button>
+  <span id="status"></span>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+<script src="worksheets.js"></script>
+<script>
+var wsId = new URLSearchParams(location.search).get("id");
+var ws = WORKSHEETS[wsId];
+var user = null;
+var currentAttempt = 1;
+
+if (!ws) document.body.innerHTML = "<p>Worksheet not found. <a href='index.html'>Back</a></p>";
+
+requireLogin(function (u) {
+  user = u;
+  document.getElementById("title").textContent = ws.title;
+  document.getElementById("slides").href = ws.slides;
+  renderQuestions();
+  loadAttemptList();
+});
+
+function renderQuestions() {
+  var box = document.getElementById("questions");
+  box.innerHTML = "";
+  ws.questions.forEach(function (q, i) {
+    var div = document.createElement("div");
+    div.className = "q";
+    var p = document.createElement("p");
+    p.textContent = q;
+    var ta = document.createElement("textarea");
+    ta.id = "ans" + i;
+    div.appendChild(p);
+    div.appendChild(ta);
+    box.appendChild(div);
+  });
+}
+
+function attemptsRef() {
+  return db.collection("students").doc(user.uid).collection("answers");
+}
+
+function docId(n) { return wsId + "_a" + n; }
+
+// Populate the attempt dropdown from existing saves, default to latest
+function loadAttemptList() {
+  attemptsRef().where("worksheetId", "==", wsId).get().then(function (snap) {
+    var nums = [];
+    snap.forEach(function (d) { nums.push(d.data().attempt); });
+    if (nums.length === 0) nums = [1];
+    nums.sort(function (a, b) { return a - b; });
+    currentAttempt = nums[nums.length - 1];
+    var sel = document.getElementById("attemptSel");
+    sel.innerHTML = "";
+    nums.forEach(function (n) {
+      var o = document.createElement("option");
+      o.value = n; o.textContent = "Attempt " + n;
+      sel.appendChild(o);
+    });
+    sel.value = currentAttempt;
+    loadAnswers();
+  });
+}
+
+function switchAttempt() {
+  currentAttempt = parseInt(document.getElementById("attemptSel").value, 10);
+  loadAnswers();
+}
+
+function newAttempt() {
+  var sel = document.getElementById("attemptSel");
+  var max = 0;
+  for (var i = 0; i < sel.options.length; i++) {
+    max = Math.max(max, parseInt(sel.options[i].value, 10));
+  }
+  currentAttempt = max + 1;
+  var o = document.createElement("option");
+  o.value = currentAttempt; o.textContent = "Attempt " + currentAttempt;
+  sel.appendChild(o);
+  sel.value = currentAttempt;
+  ws.questions.forEach(function (_, i) {
+    document.getElementById("ans" + i).value = "";
+  });
+  setStatus("New attempt started (not saved yet)");
+}
+
+function loadAnswers() {
+  attemptsRef().doc(docId(currentAttempt)).get().then(function (doc) {
+    var data = doc.exists ? doc.data().answers : {};
+    ws.questions.forEach(function (_, i) {
+      document.getElementById("ans" + i).value = (data && data["q" + i]) || "";
+    });
+    setStatus(doc.exists ? "Loaded (saved " + fmtTime(doc.data().savedAt) + ")" : "");
+  });
+}
+
+function save() {
+  var answers = {};
+  ws.questions.forEach(function (_, i) {
+    answers["q" + i] = document.getElementById("ans" + i).value;
+  });
+  attemptsRef().doc(docId(currentAttempt)).set({
+    worksheetId: wsId,
+    worksheetTitle: ws.title,
+    attempt: currentAttempt,
+    email: user.email,
+    answers: answers,
+    savedAt: firebase.firestore.FieldValue.serverTimestamp(),
+  }).then(function () {
+    setStatus("Saved ✓ " + new Date().toLocaleTimeString());
+  }).catch(function (e) {
+    setStatus("Save failed: " + e.message);
+  });
+}
+
+function setStatus(msg) { document.getElementById("status").textContent = msg; }
+</script>
+</body>
+</html>
