@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teacher view</title>
+<style>
+  body { font-family: Arial, sans-serif; color: #000; background: #fff;
+         max-width: 800px; margin: 40px auto; padding: 0 16px; }
+  select, button { font-family: Arial, sans-serif; font-size: 16px; padding: 6px;
+                   border: 1px solid #000; background: #fff; }
+  .attempt { border: 1px solid #000; padding: 12px; margin-bottom: 16px; }
+  .meta { margin-bottom: 8px; }
+  .ans { margin: 0 0 12px 0; padding-left: 12px; border-left: 1px solid #000;
+         white-space: pre-wrap; }
+  .qtext { margin-bottom: 2px; font-weight: bold; }
+  @media print { .noprint { display: none; } body { margin: 0; max-width: none; } }
+</style>
+</head>
+<body>
+
+<div class="noprint"><a href="index.html">← All worksheets</a></div>
+<h1>Teacher view</h1>
+
+<div class="noprint" style="margin-bottom:16px;">
+  Filter by worksheet:
+  <select id="filterSel" onchange="render()"><option value="">All</option></select>
+  <button onclick="load()">Refresh</button>
+  <button onclick="window.print()">Print</button>
+</div>
+
+<div id="results">Loading…</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+<script src="worksheets.js"></script>
+<script>
+var docs = [];
+
+requireLogin(function (user) {
+  if (user.email !== TEACHER_EMAIL) {
+    document.body.innerHTML = "<p>Teacher account only. <a href='index.html'>Back</a></p>";
+    return;
+  }
+  var sel = document.getElementById("filterSel");
+  Object.keys(WORKSHEETS).forEach(function (id) {
+    var o = document.createElement("option");
+    o.value = id; o.textContent = WORKSHEETS[id].title;
+    sel.appendChild(o);
+  });
+  load();
+});
+
+function load() {
+  db.collectionGroup("answers").get().then(function (snap) {
+    docs = [];
+    snap.forEach(function (d) { docs.push(d.data()); });
+    // newest first, sorted client-side to avoid needing an index
+    docs.sort(function (a, b) {
+      var ta = a.savedAt ? a.savedAt.toMillis() : 0;
+      var tb = b.savedAt ? b.savedAt.toMillis() : 0;
+      return tb - ta;
+    });
+    render();
+  }).catch(function (e) {
+    document.getElementById("results").textContent = "Load failed: " + e.message;
+  });
+}
+
+function render() {
+  var filter = document.getElementById("filterSel").value;
+  var box = document.getElementById("results");
+  box.innerHTML = "";
+  var shown = docs.filter(function (d) { return !filter || d.worksheetId === filter; });
+  if (shown.length === 0) { box.textContent = "No saved answers yet."; return; }
+
+  shown.forEach(function (d) {
+    var ws = WORKSHEETS[d.worksheetId];
+    var div = document.createElement("div");
+    div.className = "attempt";
+
+    var meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = d.email + " — " + (d.worksheetTitle || d.worksheetId) +
+      " — Attempt " + d.attempt + " — " + fmtTime(d.savedAt);
+    div.appendChild(meta);
+
+    var qs = ws ? ws.questions : [];
+    Object.keys(d.answers || {}).sort().forEach(function (key) {
+      var i = parseInt(key.slice(1), 10);
+      var q = document.createElement("div");
+      q.className = "qtext";
+      q.textContent = qs[i] || key;
+      var a = document.createElement("div");
+      a.className = "ans";
+      a.textContent = d.answers[key] || "(blank)";
+      div.appendChild(q);
+      div.appendChild(a);
+    });
+
+    box.appendChild(div);
+  });
+}
+</script>
+</body>
+</html>
